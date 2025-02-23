@@ -1,0 +1,26 @@
+[package]
+name = "dust_sweeper"
+version = "0.1.0"
+edition = "2021"
+description = "A Rust tool to identify and remove dust UTXOs in a privacy-preserving way."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/IgnacioPorte/dust_sweeper"
+homepage = "https://github.com/IgnacioPorte/dust_sweeper"
+readme = "README.md"
+keywords = ["bitcoin", "utxo", "privacy", "dust", "wallet"]
+categories = ["cryptography", "command-line-utilities"]
+authors = ["Ignacio Porte <ignacio.porte@uc.cl>"]
+
+[dependencies]
+bitcoin = "0.32.5"
+bitcoincore-rpc = "0.19.0"
+clap = { version = "4.4", features = ["derive"] }
+base64 = "0.22.1"
+
+[lib]
+name = "dust_cleaner"
+path = "src/lib.rs"
+
+[[bin]]
+name = "dust_sweeper_cli"
+path = "src/bin/dust_sweeper_cli.rs"
