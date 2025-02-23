@@ -3,9 +3,9 @@ use bitcoin::{
 };
 use bitcoin::psbt::Psbt;
 use bitcoin::Amount;
-
 use bitcoincore_rpc::{Client, RpcApi};
 use base64::{engine::general_purpose, Engine as _};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 pub struct DustSweeper {
@@ -24,8 +24,32 @@ impl DustSweeper {
             .filter(|u| u.amount.to_sat() < self.threshold)
             .collect())
     }
-    
-    pub fn build_psbt(&self, dust_utxos: Vec<bitcoincore_rpc::json::ListUnspentResultEntry>) -> Result<Psbt, bitcoin::psbt::Error> {
+
+    fn group_utxos_by_address(&self, utxos: Vec<bitcoincore_rpc::json::ListUnspentResultEntry>) -> HashMap<String, Vec<bitcoincore_rpc::json::ListUnspentResultEntry>> {
+        let mut grouped: HashMap<String, Vec<bitcoincore_rpc::json::ListUnspentResultEntry>> = HashMap::new();
+
+        for utxo in utxos {
+            if let Some(address) = &utxo.address {
+                grouped.entry(address.clone().assume_checked().to_string()).or_default().push(utxo);
+            }
+        }
+
+        grouped
+    }
+
+    pub fn build_psbts_burn(&self, dust_utxos: Vec<bitcoincore_rpc::json::ListUnspentResultEntry>, fee: u64, burn_addr: &str) -> Result<Vec<Psbt>, bitcoin::psbt::Error> {
+        let utxos_by_address = self.group_utxos_by_address(dust_utxos);
+        let mut psbts = Vec::new();
+
+        for (_address, utxos) in utxos_by_address {
+            let psbt = self.build_psbt(utxos, fee, burn_addr)?;
+            psbts.push(psbt);
+        }
+
+        Ok(psbts)
+    }
+
+    fn build_psbt(&self, dust_utxos: Vec<bitcoincore_rpc::json::ListUnspentResultEntry>, fee: u64, burn_addr: &str) -> Result<Psbt, bitcoin::psbt::Error> {
         let inputs: Vec<TxIn> = dust_utxos.iter().map(|u| {
             TxIn {
                 previous_output: OutPoint { txid: u.txid, vout: u.vout },
@@ -34,36 +58,31 @@ impl DustSweeper {
                 witness: Witness::new(),
             }
         }).collect();
-    
-        let total_input_amount: u64 = dust_utxos.iter().map(|u| u.amount.to_sat()).sum();
-    
-        let burn_address = Address::from_str("1BitcoinEaterAddressDontSendf59kuE")
-            .expect("Invalid burn address")
-            .assume_checked();
-    
-        let fee = 500;
 
-        if total_input_amount <= fee {
-            panic!("Total dust amount too small to cover fee!");
-        }
-    
+        let total_input_amount: u64 = dust_utxos.iter().map(|u| u.amount.to_sat()).sum();
+
+        let output_value = total_input_amount.saturating_sub(fee);
+
+        let burn_address = Address::from_str(burn_addr)
+            .expect("❌ Invalid burn address")
+            .assume_checked();
+
         let txout = TxOut {
-            value: Amount::from_sat(total_input_amount - fee),
+            value: Amount::from_sat(output_value),
             script_pubkey: burn_address.script_pubkey(),
         };
-    
+
         let outputs: Vec<TxOut> = vec![txout];
-    
+
         let unsigned_tx = Transaction {
             version: Version(2),
             lock_time: bitcoin::absolute::LockTime::ZERO,
             input: inputs,
             output: outputs,
         };
-    
+
         Psbt::from_unsigned_tx(unsigned_tx)
     }
-    
 
     pub fn psbt_to_base64(psbt: &Psbt) -> String {
         general_purpose::STANDARD.encode(psbt.serialize())
